@@ -1,0 +1,47 @@
+﻿<html xmlns:msxsl="urn:schemas-microsoft-com:xslt" xmlns:ddue="http://ddue.schemas.microsoft.com/authoring/2003/5">
+  <head>
+    <META http-equiv="Content-Type" content="text/html; charset=utf-8"><script language="JavaScript">
+				var currentSelectedItem = null;
+
+				function ToggleNode(node)
+				{
+				   var expandThis = document.getElementById(node).style;
+				   if(expandThis.display == "block")
+					expandThis.display = "none";
+				   else
+					expandThis.display="block";
+				}
+
+				function ToggleExpand(node)
+				{
+				  var content = document.getElementById(node);
+				  if(content.src.indexOf("collapse.gif")>-1)
+				    content.src="local/expand.gif";
+				  else
+				    content.src="local/collapse.gif";
+
+				}
+				function SetBgColor(selectedItem)
+				{
+					if(currentSelectedItem!=null)
+						currentSelectedItem.style.background = "white";
+					selectedItem.style.background = "silver";
+					currentSelectedItem = selectedItem;
+				}
+                </script><link rel="stylesheet" type="text/css" href="local/Frameset.css">
+  </head>
+  <body nowrap="true">
+    <div id="header"><span id="headerInActive"><b>Contents</b>|
+          </span><a href="index.htm" id="headerActive">Index</a></div>
+    <div class="anchor"><img class="plusminus" align="absmiddle" src="local/leaf.gif"> <a href="html/a0ff66dd-7c8f-49f2-94c6-9d1b900d8aea.htm" target="main" onClick="SetBgColor(this);">Welcome to the Microsoft SQL Server ODBC Driver for Linux</a></div>
+    <div class="anchor"><img class="plusminus" align="absmiddle" src="local/leaf.gif"> <a href="html/6a175513-f1bc-4040-b14f-774276bdb884.htm" target="main" onClick="SetBgColor(this);">Known Issues in this Build of the Driver</a></div>
+    <div class="anchor"><img class="plusminus" align="absmiddle" src="local/leaf.gif"> <a href="html/f03b7fdd-0e9d-4e74-958d-e8c87e027348.htm" target="main" onClick="SetBgColor(this);">System Requirements</a></div>
+    <div class="anchor"><img class="plusminus" align="absmiddle" src="local/leaf.gif"> <a href="html/7c4b6fb4-f45a-4973-adb9-a4d83f0a2a7a.htm" target="main" onClick="SetBgColor(this);">Installing the Driver Manager</a></div>
+    <div class="anchor"><img class="plusminus" align="absmiddle" src="local/leaf.gif"> <a href="html/f78b81ed-5214-43ec-a600-9bfe51c5745a.htm" target="main" onClick="SetBgColor(this);">Installing the Microsoft SQL Server ODBC Driver for Linux</a></div>
+    <div class="anchor"><img class="plusminus" align="absmiddle" src="local/leaf.gif"> <a href="html/f95cdbce-e7c2-4e56-a9f7-8fa3a920a125.htm" target="main" onClick="SetBgColor(this);">Connection String Keywords and Data Source Names (DSNs)</a></div>
+    <div class="anchor"><img class="plusminus" align="absmiddle" src="local/leaf.gif"> <a href="html/9499ffdf-e0ee-4d3c-8bca-605371eb52d9.htm" target="main" onClick="SetBgColor(this);">Using Integrated Authentication</a></div>
+    <div class="anchor"><img class="plusminus" align="absmiddle" src="local/leaf.gif"> <a href="html/61a2ec0d-1bcb-4231-bea0-cff866c21463.htm" target="main" onClick="SetBgColor(this);">Connecting with sqlcmd</a></div>
+    <div class="anchor"><img class="plusminus" align="absmiddle" src="local/leaf.gif"> <a href="html/3eca5717-e50f-40db-be16-a1cebbdfee70.htm" target="main" onClick="SetBgColor(this);">Connecting with bcp</a></div>
+    <div class="anchor"><img class="plusminus" align="absmiddle" src="local/leaf.gif"> <a href="html/0cc8686c-e27b-4963-b674-dc420fcbd3d2.htm" target="main" onClick="SetBgColor(this);">Programming Guidelines</a></div>
+  </body>
+</html>

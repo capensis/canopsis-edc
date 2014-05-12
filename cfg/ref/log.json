@@ -1,0 +1,11 @@
+{
+	"-singlefile":"all-logs.log",
+	"multi-infofile":"info.log",
+	"multi-errfile":"error.log",
+	"multi-dbgfile":"debug.log",
+	"rotate-maxBytes":"50000",
+	"rotate-backupCount":0,
+	"logInConsole":1,
+	"level":"DEBUG",
+	"BIB_DBG_DEFAULT_MESSAGE": "EDC"
+}

@@ -1,0 +1,36 @@
+#!/usr/bin/env python
+#--------------------------------
+# copyright (c) 2011 "capensis" [http://www.capensis.com]
+#
+# this file is part of canopsis.
+#
+# canopsis is free software: you can redistribute it and/or modify
+# it under the terms of the gnu affero general public license as published by
+# the free software foundation, either version 3 of the license, or
+# (at your option) any later version.
+#
+# canopsis is distributed in the hope that it will be useful,
+# but without any warranty; without even the implied warranty of
+# merchantability or fitness for a particular purpose.  see the
+# gnu affero general public license for more details.
+#
+# you should have received a copy of the gnu affero general public license
+# along with canopsis.  if not, see <http://www.gnu.org/licenses/>.
+# ---------------------------------
+
+
+import os
+global base
+base = os.environ['EDC_HOME']
+
+import sys
+#We import the right library path
+from edc_lib import candles
+
+def testfct( resultats, settings, params, args ):
+	print "resultats"
+	print resultats
+	print "settings"
+	print settings
+	print "params"
+	print params

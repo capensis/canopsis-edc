@@ -1,0 +1,829 @@
+#!python
+# -*- coding: utf-8 -*-
+
+import sys, os, types
+#import plx, os
+import logging, bibutils
+from logging.handlers import RotatingFileHandler
+from string import Template
+import time
+import errno
+import subprocess
+
+logging.getLogger(u'BibConsoleLogger')
+logging.getLogger(u'BibInfoLogger')
+logging.getLogger(u'BibDebugLogger')
+logging.getLogger(u'BibErrLogger')
+
+_BIBLOG_VERSION_ = u'1.0.2'
+
+
+import threading
+import re
+"""
+PUBLIC MODULE VARIABLES
+"""
+
+"""
+PRIVATE ATTRIBUTES
+
+"""
+
+LOGFORMAT = EXPLOGFORMAT = u"[%(asctime)s-%(msecs)d]%(message)s"
+EXTENDEDFORMAT = u"[%(PID)s][%(cdmsg)s][%(typemsg)s][%(cdlevel)s][%(cdtype)s][%(cdapp)s][%(flbc)s][%(exec_user)s][%(oksupervise)s][%(urlhelp)s][%(progpath)s][%(threadName)s][%(funcName)s][%(lineno)s]"
+
+EXCEPTFORMAT=u"[%(PID)s] "
+
+DATEFORMAT = u'%m-%d %H:%M:%S',
+DATEFORMAT = u"%Y-%m-%d %H:%M:%S"
+
+"""
+PRIVATE FUNCTIONS
+"""
+def current_user():
+	try:
+		#return pwd.getpwuid(os.getuid()).pw_name #NOT PORTABLE
+		#return plx.get_username()
+		if os.name in (u"nt", u"dos"):
+			return os.getenv(u"USERNAME")
+		else:
+			return os.getenv(u"USER")
+	except KeyError:
+		return "(unknown)"
+	
+def getCurrentThreadName():
+	if hasattr(threading,u"current_thread"):
+		athread = threading.current_thread()
+		cthread = athread.name
+	else:
+		cthread = u"<MainThread?>"
+	return cthread
+
+ginfo = {u'filename':'', u'module':'', u'lineno':'', u'funcName':'',u'PID':'',u'exec_user':'',u'progpath':'',u"threadName":''}
+
+def _getInfo():
+	fn, lno, func = _findCaller()
+	filename = os.path.basename(fn)
+	dirname = os.path.dirname(fn)
+	module = os.path.splitext(filename)[0]
+	#func = sys._getframe(3).f_code.co_name
+	info = {u'filename':filename, u'module':module, u'lineno':unicode(lno), u'funcName':func,u'PID':unicode(os.getpid()),u'exec_user':current_user(),u'progpath':dirname,u"threadName":getCurrentThreadName()}
+	for f in ginfo:
+		if not ginfo[f]=='':
+			info[f]=ginfo[f]
+	return info
+
+# FOR BACKWARD COMPATIBILITY CALL SIGNATURE (python 2.4 has no extra params for logging)
+# Adding the 'username' and 'funcname' specifiers
+# They must be attributes of the log record
+
+# Custom log record
+class OurLogRecord(logging.LogRecord):
+	def __init__(self, name, level, fn, lno, msg, args, exc_info, func):
+		# Don't pass all args to LogRecord constructor bc it doesn't expect "extra"
+		#func not used for backward compatibility
+		logging.LogRecord.__init__(self, name, level, fn, lno, msg, args, exc_info)
+		# Adding format specifiers is as simple as adding attributes with
+		# same name to the log record object:
+		self.funcname = calling_func_name()
+
+class OurLogger(logging.getLoggerClass()):
+	def makeRecord(self, name, level, fn, lno, msg, args, exc_info, func=None, extra=None):
+		# Don't pass all makeRecord args to OurLogRecord bc it doesn't expect "extra"
+		rv = OurLogRecord(name, level, fn, lno, msg, args, exc_info, func)
+		# Handle the new extra parameter.
+		# This if block was copied from Logger.makeRecord
+		if len(args)>0:
+			for key in args[0]:
+					if (key in [u"message", u"asctime"]) or (key in rv.__dict__):
+						raise KeyError(u"Attempt to overwrite %r in LogRecord" % key)
+					rv.__dict__[key] = args[0][key]
+		return rv
+
+class BibLogFormatter(logging.Formatter):
+	last_s=None
+	def formatTime(self, record, datefmt=None):
+		ct = self.converter(record.created)
+		if datefmt:
+			s = time.strftime(datefmt, ct)
+		else:
+			t = time.strftime(DATEFORMAT, ct)
+			s = u"%s" % (t)
+		self.last_s=s
+		return s
+	def formatException(self,exc_info):
+		info=_getInfo()
+		prefix=u"\t["+self.last_s+u"]"+EXCEPTFORMAT%info
+		exc = logging.Formatter.formatException(self,exc_info)
+		exc=exc.replace(u"\n",u"\n"+prefix)
+		return prefix+exc
+
+# Register our logger
+logging.setLoggerClass(OurLogger)
+
+
+# Current user
+
+# Calling Function Name
+def calling_func_name():
+	if not ginfo[u'funcName']==u'':
+		return ginfo[u'funcName']
+	return calling_frame().f_code.co_name
+
+def calling_frame():
+	f = sys._getframe()
+
+	while True:
+		if is_user_source_file(f.f_code.co_filename):
+			return f
+		f = f.f_back
+
+def is_user_source_file(filename):
+	return os.path.normcase(filename) not in (_srcfile, logging._srcfile)
+
+def _current_source_file():
+	if __file__[-4:].lower() in [u'.pyc', u'.pyo']:
+		return __file__[:-4] + u'.py'
+	else:
+		return __file__
+
+_srcfile = os.path.normcase(_current_source_file())
+## end of http://code.activestate.com/recipes/474089/ }}}
+
+def _getConsoleHandler(level,logformat):
+	# define a Handler which writes INFO messages or higher to the sys.stderr
+	console = logging.StreamHandler()
+	console.setLevel(level)
+	# set a format which is simpler for console use
+	
+	formatter = BibLogFormatter(fmt=unicode(logformat))
+	#formatter = logging.Formatter(unicode(LOGFORMAT))
+#	formatter = logging.Formatter('%(name)-12s: %(levelname)-8s %(message)s')
+
+	# tell the handler to use this format
+	console.setFormatter(formatter)
+	return console
+
+class ErrorFilter(logging.Filter):
+	def filter(self, rec):
+		return rec.levelno == logging.INFO
+
+
+	
+def _bibThrow(exc_info=(None, None, None), errorMsg=''):
+	"""Re-raise the latest exception given by exc_info tuple (as returned by
+	sys.exc_info()) with additional errorMsg text.
+	Exceptions with non-standard constructors get re-raised as derived
+	exceptions, with recorded original error message and original traceback.
+	Parameters:
+		exc_info: (<exception class>, <exception instance>, <traceback object>)
+			tuple
+		errorMsg: error message text to add to the exception error message
+	"""
+	excClass, exc, tb = exc_info
+	try:
+		# re-raise original exception with added custom error message
+		raise excClass( excClass(u"%s: %s" % (exc, errorMsg)), tb)
+	except TypeError:
+		if excClass == TypeError:
+			# original exception is TypeError, which has a standard constructor:
+			# safe to re-raise this way
+			raise excClass( excClass(u"%s: %s" % (exc, errorMsg)), tb)
+
+		# TypeError due to non-standard exception constructor 
+		if isinstance(excClass, (types.ClassType, type)) \
+		   and issubclass(excClass, Exception):
+			# raise derived exception class with added custom error message
+			class CustomInfoException(excClass):
+				def __init__(self, info='', args=[]):
+					self._info = info
+					excClass.__init__(self, *args)
+
+				def __str__(self):
+					return u"%s: %s" % (excClass.__str__(self), self._info)
+
+			CustomInfoException.__name__ = excClass.__name__
+			raise CustomInfoException( CustomInfoException(info=errorMsg, args=exc.args), tb)
+		else:
+			# raise base Exception class with added original exception
+			# message plus custom error message. Safe for old string exceptions.
+			raise Exception (Exception(u"%s: %s: %s" % (getattr(excClass, u'__name__', excClass), exc or excClass, errorMsg)), tb)
+
+def _currentframe():
+	"""Return the frame object for the caller's stack frame."""
+	try:
+		raise Exception
+	except:
+		return sys.exc_info()[2].tb_frame.f_back
+	
+#if hasattr(sys, '_getframe'): _currentframe = lambda: sys._getframe(3)
+if hasattr(sys, u'frozen'): #support for py2exe
+	_srcfile = u"logging%s__init__%s" % (os.sep, __file__[-4:])
+elif __file__[-4:].lower() in [u'.pyc', u'.pyo']:
+	_srcfile = __file__[:-4] + u'.py'
+else:
+	_srcfile = __file__
+_srcfile = os.path.normcase(_srcfile)
+
+def _callersname():
+	return sys._getframe(2).f_code.co_name
+
+## end of http://code.activestate.com/recipes/66062/ }}}
+
+def _findCaller():
+		"""
+		Find the stack frame of the caller so that we can note the source
+		file name, line number and function name.
+		"""
+		f = _currentframe()
+		#On some versions of IronPython, _currentframe() returns None if
+		#IronPython isn't run with -X:Frames.
+		if f is not None:
+			f = f.f_back
+		rv = "(unknown file)", 0, "(unknown function)"
+		while hasattr(f, u"f_code"):
+			co = f.f_code
+			filename = os.path.normcase(co.co_filename)
+			if filename == _srcfile:
+				f = f.f_back
+				continue
+			acl = co.__class__.__name__
+			rv = (co.co_filename, f.f_lineno, co.co_name)
+			break
+		return rv
+
+def _getExtra(msgId=None,msg=None):
+	#func = sys._getframe(3).f_code.co_name
+	info = _getInfo()
+	if msgId :
+		for key in msgId:
+			info[key]=msgId[key]
+		logformat = LOGFORMAT
+		for nm in info:		
+			logformat = logformat.replace(u"%("+nm+u")d","")
+			logformat = logformat.replace(u"%("+nm+u")s","")
+		logformat = logformat.replace(u"%(asctime)s",u"")
+		logformat = logformat.replace(u"%(threadName)s",u"")
+		logformat = logformat.replace(u"%(message)s",u"")
+		logformat = logformat.replace(u"%(msecs)d",u"")
+		
+		if logformat.find(u"%(")!=-1:
+			print (u"######### ERROR miss parameters ####",logformat)
+	return info
+
+"""
+PUBLIC MODULE CLASSES
+"""
+
+TYPE_MSG_CONV={u'E':u'ERROR',u'D':u'DEBUG',u'W':u'WARN',u'I':u'INFO'}
+LEVELS={u'DEBUG':0,u'INFO':10,u'ERROR':20}
+
+def is_array(var):
+	return isinstance(var, (list, tuple))
+
+class BibMessageLog(object):
+	msgstr = None
+	type = None
+	def __init__(self,msgIn,params=[],extendedformat=None):
+		#messageconf.__dict__.hasattr(msgId)
+		#self.msg = bibutils.dict2obj(messageconf.__dict__[msgId])
+		msg=None
+		if not extendedformat:
+			print (u"PROGRAMMING ERROR, it to remind me, this will never occur in real life")
+		if not is_array(params):
+			print params
+			params=[unicode(params)]
+		prm = None 
+		if bibutils.is_array(params):
+			prm = bibutils.array2Dict(params,u"P")
+			prm[u"P0"]=current_user()
+			
+		if isinstance(msgIn, dict):
+			msg=bibutils.dict2obj(msgIn)
+		else:
+			if type(msgIn) ==bibutils.dict2obj:
+				msg=msgIn
+		self.type = u"ERROR"
+		msgstr = u"#UNDEF#_ID"
+		if msg :
+			self.type = u'?'
+			if msg.typemsg in TYPE_MSG_CONV:
+				self.type = TYPE_MSG_CONV[msg.typemsg]
+			msgstr = msg.lbc.replace(u"%",u"$")
+			msgstr = re.sub(r"\$(\d)",r"$P\1",msgstr)
+			try:
+				self.msgstr = msgstr
+				if prm:
+					self.msgstr = Template(msgstr).safe_substitute(prm)
+				msgIn[u"flbc"] = self.msgstr 
+				extra=_getExtra(msgIn)
+				#expformat = EXTENDEDFORMAT.replace("%","$")
+				self.msgstr =  extendedformat % extra
+				#newstr = Template(expformat).safe_substitute(extra)
+				#self.msgstr = newstr+" - "+self.msgstr
+			except KeyError :
+				err = unicode(sys.exc_info()[1])
+				print (u"#### KeyError in "+extendedformat,err)
+				pass
+			except Exception :
+				err = unicode(sys.exc_info()[1])
+				print (u"##raised except while creating Message Template: params=",params,u"msgstr=",self.msgstr,u" Exception :",err)
+				pass
+
+		else:
+			print (u"logging with unknown message")
+	def __repr__(self): #python 3
+		return unicode(self.msgstr).replace(u"%",u"?")
+	#def __str__(self):return unicode(self).encode('utf-8')
+	#def __unicode__(self):		return 'Hello World '+self.msg
+
+"""
+PUBLIC FUNCTIONS
+"""
+
+def loadMsgConf(path):
+	jsonconf = bibutils.getObjectFromJson(path)
+	conf=bibutils.dict2obj(jsonconf)
+	return conf
+
+#@deprecated
+def bibMsgRaise(cdmsg="", params=[]):
+	_bibThrow(sys.exc_info(), cdmsg)
+	
+	
+class BibException(Exception):
+	pass
+	
+class BibBadConfException(BibException):
+	pass
+
+
+loggerInstNumber=0
+class BibLogger(object):
+	_errLogger = None
+	_infoLogger = None
+	_dbgLogger = None
+	_consoleLogger = None
+	_excLogger = None
+	cfgLog = None
+	msgconf = None
+	instNumber=0
+	maxBytes=0
+	backupCount=0
+	singlefile = None
+	dbgfile = None
+	errfile = None
+	infofile = None
+	logInConsole = 1
+	level = 0
+	logformat = ""
+	extendedformat= ""
+	quiet=False
+	def __init__(self,confs=None,msgconf=None,logformat=LOGFORMAT,extendedformat=EXTENDEDFORMAT,quiet=False,loggerId=None,keywords=None,debugDev=False):
+		global loggerInstNumber
+		loggerInstNumber+=1
+		self.instNumber=loggerInstNumber
+		self.logformat = logformat
+		self.quiet=quiet
+		self.extendedformat=extendedformat
+		_msgconf=msgconf
+		if debugDev:print u"\tDEV:dev messages ON , should to be deactivated in normal mode "
+		if not msgconf:
+			if u"BIB_MSGCONF_PATH" in os.environ:
+				BIB_MSGCONF_PATH=os.environ[u"BIB_MSGCONF_PATH"]
+				if debugDev:print u"\tDEV:load msg conf from $BIB_MSGCONF_PATH env var =",BIB_MSGCONF_PATH
+				_msgconf = loadMsgConf(BIB_MSGCONF_PATH)
+			else:
+				print (u"#### FATAL ERROR : ###\npas de fichier de conf des message en paramètre et la variable d'environnement BIB_MSGCONF_PATH n'a pas été renseignée")
+				exit(0)
+		else:
+			if not isinstance(msgconf, bibutils.dict2obj):
+				if isinstance(msgconf, dict):
+					if debugDev:print u"\tDEV:load msg conf from dict paramater"
+					_msgconf=bibutils.dict2obj(msgconf)
+				else:
+					if isinstance(msgconf, (str,unicode)):
+						_msgconf = loadMsgConf(msgconf)
+		_confs=confs
+		if not confs:
+			if u"BIB_LOGCONF_PATH" in os.environ:
+				BIB_LOGCONF_PATH=os.environ[u"BIB_LOGCONF_PATH"]
+				if debugDev:print u"\tDEV:load log conf from $BIB_LOGCONF_PATH env var = ",BIB_LOGCONF_PATH
+				_confs = loadMsgConf(BIB_LOGCONF_PATH)
+			else:
+				print (u"#### FATAL ERROR : ###\npas de fichier de conf des logs en paramètre et la variable d'environnement BIB_LOGCONF_PATH n'a pas été renseignée")
+				exit(0)
+		else:
+			if not isinstance(confs, bibutils.dict2obj):
+				if isinstance(msgconf, dict):
+					_confs=bibutils.dict2obj(confs)
+				else:
+					if isinstance(confs, (str,unicode)):
+						_confs = loadMsgConf(confs)
+
+		_speconfs = None
+		if u"BIB_LOGSPECONF_PATH" in os.environ:
+				BIB_LOGSPECONF_PATH=os.environ[u"BIB_LOGSPECONF_PATH"]
+				if debugDev:print u"\tDEV:load special conf from $BIB_LOGSPECONF_PATH env var = ",BIB_LOGSPECONF_PATH
+				_speconfs = loadMsgConf(BIB_LOGSPECONF_PATH)
+
+		self.useDefault=True
+		self.loggerId= None
+		if loggerId :
+			if _confs.get(loggerId,None):
+				#print "using ",loggerId,"looger from conf"
+				if debugDev:print u"\tDEV:using ",loggerId,u"looger from conf"
+				self.loggerId=loggerId
+				_confs=_confs[loggerId]
+				self.useDefault=False
+
+		if self.useDefault:
+			if _confs.get(u"default",False):
+				#print "using default looger from conf"
+				if debugDev:print u"\tDEV:use Default conf"
+				self.loggerId=u"default"
+				_confs=_confs[u"default"]
+		
+		if self.loggerId!=u"default":
+			if _speconfs:
+				_speconfs=_speconfs.get(self.loggerId,None)
+				if _speconfs:
+					for k in _speconfs:
+						_confs[k]=_speconfs[k]
+			
+		if keywords:
+			for kw in keywords:
+				for k in _confs:
+					if isinstance(_confs[k],( str, unicode)):
+						_confs[k]=_confs[k].replace(u"$("+kw+u")",keywords[kw])
+		
+
+		isEmptyConf=True
+		if u"singlefile" in _confs:
+			if _confs[u"singlefile"]:
+				self.singlefile=_confs[u"singlefile"]
+				self.createdir(self.singlefile)
+				self.dbgfile=self.singlefile
+				self.errfile=self.singlefile
+				self.infofile=self.singlefile
+				isEmptyConf=False
+		else:
+			if u"multi-dbgfile" in _confs:
+				if _confs[u"multi-dbgfile"]:
+					self.dbgfile = _confs[u"multi-dbgfile"]
+					self.createdir(self.dbgfile)
+					isEmptyConf=False
+		
+			if u"multi-errfile" in _confs:
+				if _confs[u"multi-errfile"]:
+					self.errfile = _confs[u"multi-errfile"]
+					self.createdir(self.errfile)
+					isEmptyConf=False
+
+			if u"multi-infofile" in _confs:
+				if _confs[u"multi-infofile"]:
+					self.infofile = _confs[u"multi-infofile"]
+					self.createdir(self.infofile)
+					isEmptyConf=False
+				
+		if u"level" in _confs:
+			if _confs[u"level"] in LEVELS:
+				if LEVELS[_confs[u"level"]]:
+					self.level=LEVELS[_confs[u"level"]]
+					isEmptyConf=False
+			
+
+		if  u"rotate-maxBytes" in _confs:
+			if _confs[u"rotate-maxBytes"]:
+				self.maxBytes=int(_confs[u"rotate-maxBytes"])
+				isEmptyConf=False
+
+		if  u"rotate-backupCount" in _confs:
+			if _confs[u"rotate-backupCount"]:
+				self.backupCount=int(_confs[u"rotate-backupCount"])
+				isEmptyConf=False
+
+		if  u"logInConsole" in _confs:
+			if _confs.logInConsole is not None:
+				self.logInConsole=int(_confs.logInConsole)
+				isEmptyConf=False
+		self.debugDev=debugDev 
+		if not debugDev:
+			self.debugDev = _confs.get(u"debugDev",False)
+			
+		
+			
+		if self.debugDev:
+			print u"\tDEV:dbgfile",self.dbgfile,u"errfile",self.errfile,u"infofile",self.infofile
+
+		if isEmptyConf:
+			raise BibBadConfException(u"le fichier de conf est vide!")
+		if not _msgconf :
+			raise BibBadConfException(u"_msgconf null, le fichier de message est incorrecte")
+		if not _msgconf :
+			raise BibBadConfException(u"_msgconf null, le fichier de message est incorrecte")
+		self.msgconf = _msgconf
+		
+		if not u'BIB_DBG_DEFAULT_MESSAGE' in self.msgconf:
+			raise BibBadConfException(u"BIB_DBG_DEFAULT_MESSAGE introuvable, le fichier de message est incorrecte")
+		self.msgconf = _msgconf
+
+		if self.useDefault and self.loggerId!=u"default":
+			self.debug(u"WARNING : Le logger fourni n'a pas été trouvé, utilisation du logger default !")
+		
+	def setLevel(self,level):
+		if level in LEVELS:
+				if LEVELS[level]:
+					self.level=LEVELS[level]
+		else:
+			print (u"unknown trace level : "+level)
+			
+	def createdir(self,errfile):
+			path=os.path.dirname(errfile)
+			if len(path)==0:
+				return
+			try:
+				os.makedirs(path)
+			except OSError :
+				etype = sys.exc_info()[0]
+				#print ("etype=",etype)
+				#evalue = sys.exc_info()[1]
+				#etb = traceback.extract_tb(sys.exc_info()[2])
+				#if etype.__class__.__name__ != 'FileExistsError':
+				#	print ("probleme de création du répertoire '"+path+"' type=",etype)
+				#	raise BibException("probleme de création du répertoire '"+path+"'")
+			
+				
+	def _getErrLogger(self):
+		if self.singlefile :
+			return self._getDebugLogger()
+		if self._errLogger == None and self.errfile:
+			self._errLogger = logging.getLogger(u'BibErrLogger')
+			#hdlr = logging.FileHandler(cfgLog.errfile)
+			hdlr = RotatingFileHandler(self.errfile, maxBytes=self.maxBytes, backupCount=self.backupCount)
+			#rotateHandler = ConcurrentRotatingFileHandler(cfgLog.errfile, "a", 512*1024, 5)
+			#formatter = logging.Formatter(unicode(LOGFORMAT))
+			formatter = BibLogFormatter(fmt=unicode(self.logformat))
+			hdlr.setFormatter(formatter)
+			self._errLogger.addHandler(hdlr) 
+			
+			self._errLogger.setLevel(logging.ERROR)
+			
+			# Add the log message handler to the logger		#_errLogger.addFilter(ErrorFilter())
+			# Add the log message handler to the logger
+		return self._errLogger
+	
+	def _getConsoleLogger(self):
+		if self._consoleLogger == None:
+			self._consoleLogger = logging.getLogger(u'BibConsoleLogger'+unicode(self.instNumber))
+			formatter = BibLogFormatter(fmt=unicode(self.logformat))
+			self._consoleLogger.setLevel(logging.ERROR)
+			self._consoleLogger.setLevel(logging.INFO)
+			self._consoleLogger.setLevel(logging.DEBUG)
+			
+			cons = _getConsoleHandler(logging.DEBUG,self.logformat)
+			cons.setFormatter(formatter)
+			self._consoleLogger.addHandler(cons)
+			
+			# Add the log message handler to the logger
+		return self._consoleLogger
+	
+	def _getDebugLogger(self):
+		if self._dbgLogger == None and self.dbgfile:
+			self._dbgLogger = logging.getLogger(u'BibDebugLogger'+unicode(self.instNumber))
+			#hdlr = logging.FileHandler(cfgLog.errfile)
+			hdlr = RotatingFileHandler(self.dbgfile, maxBytes=self.maxBytes, backupCount=self.backupCount)
+			#rotateHandler = ConcurrentRotatingFileHandler(cfgLog.errfile, "a", 512*1024, 5)
+			#formatter = logging.Formatter(unicode(self.logformat), unicode(DATEFORMAT))
+			formatter = BibLogFormatter(fmt=unicode(self.logformat))
+			hdlr.setFormatter(formatter)
+			self._dbgLogger.setLevel(logging.ERROR)
+			self._dbgLogger.setLevel(logging.INFO)
+			self._dbgLogger.setLevel(logging.DEBUG)
+			self._dbgLogger.addHandler(hdlr) 
+			
+			# Add the log message handler to the logger
+		return self._dbgLogger
+	
+	def _getInfoLogger(self):
+		if self.singlefile and self.infofile:
+			return self._getDebugLogger()
+		if self._infoLogger == None:
+			self._infoLogger = logging.getLogger(u'BibInfoLogger'+unicode(self.instNumber))
+			#hdlr = logging.FileHandler(cfgLog.errfile)
+			hdlr = RotatingFileHandler(self.infofile, maxBytes=self.maxBytes, backupCount=self.backupCount)
+			#rotateHandler = ConcurrentRotatingFileHandler(cfgLog.errfile, "a", 512*1024, 5)
+			#formatter = logging.Formatter(unicode(self.logformat), unicode(DATEFORMAT))
+			formatter = BibLogFormatter(fmt=unicode(self.logformat))
+			hdlr.setFormatter(formatter)
+			self._infoLogger.addHandler(hdlr) 
+			self._infoLogger.setLevel(logging.INFO)
+			# Add the log message handler to the logger
+		return self._infoLogger
+
+	def exc(self,msgId,params):
+		#import traceback
+		#traceback.print_exc()
+		msg = BibMessageLog(msgId,params,self.extendedformat)
+		#extra['threadName']="THREADNAME"
+		#msg = EXTENDEDFORMAT % extra
+		if self.level <= LEVELS[u"ERROR"]: 
+			if self.errfile:
+				self._getErrLogger().error(u" Exception "+unicode(msg), exc_info=1)
+			if self.logInConsole and not self.quiet :
+				self._getConsoleLogger(self.logformat).error(u" Exception "+unicode(msg), exc_info=1)
+	
+	def log(self,inMsgId,params=[]):
+		'''
+		display an application message with a standard formating. 
+		condition :
+		A message must be created with the bib web interface, 
+		first check if your message does not already exists, then if not, create it and
+		use the bibSyncTool to generate the python message file with global log message constants.
+		:param msgId: this argument must be a valid id message
+		'''
+		#phil
+		msgId=inMsgId
+		if isinstance(msgId, (str,unicode)):
+			msgId=self.msgconf[msgId]
+		msg = BibMessageLog(msgId,params,self.extendedformat)
+		message=unicode(msg)
+		#phil
+		if msg.type == u"ERROR" :
+			if self.level <= int(LEVELS[u"ERROR"]): 
+				if self.errfile :
+					self._getErrLogger().error(message)
+					if self.dbgfile:
+						self._getDebugLogger().error(message)
+				if self.logInConsole and not self.quiet:
+					self._getConsoleLogger().error(message)
+
+		elif   msg.type == u"DEBUG" :
+			if self.level <= LEVELS[u"DEBUG"]: 
+				if self.dbgfile:
+					self._getDebugLogger().debug(message)
+				if self.logInConsole and not self.quiet:
+					self._getConsoleLogger().debug(message)
+
+		elif   msg.type == u"INFO" :
+			if self.level <= LEVELS[u"INFO"]: 
+				if self.infofile:
+					self._getInfoLogger().info(message)
+					if self.dbgfile:
+						self._getDebugLogger().info(message)
+				if self.logInConsole and not self.quiet:
+					self._getConsoleLogger().info(message)
+			
+	def debug(self,msgStr):
+		'''
+		display a simple application debug message with a standard formating. 
+		pre-condition :
+		this function uses a predefined message id to get standard format, 
+		so please use the bibSyncTool to generate the python message file 
+		with log message constants.
+			
+		:param msgStr: the debug message string to display
+		'''
+		if 'BIB_DBG_DEFAULT_MESSAGE' in self.msgconf.__dict__:
+			self.log(self.msgconf.BIB_DBG_DEFAULT_MESSAGE,params=[msgStr])
+		else: 
+			self.log(0,params=[msgStr])
+
+
+######################################################################################
+######################################################################################
+################# THIS PART IS FOR CALLING FROM SH ###################################
+######################################################################################
+######################################################################################
+	
+from optparse import OptionParser
+checkoptions=False
+def startCmd(args):
+	desc="""
+	Ce programme python permet de logger dans un fichier une chaine formatée avec le standard EIFFAGE
+	"""
+	parser = OptionParser(u"%prog -h pour afficher l'aide",description=desc)
+
+	parser.add_option(u"-s", u"--singlefile", dest=u"singlefile",
+					help=u"Un seul fichier commun de log",metavar='<file>')
+
+	parser.add_option(u"-e", u"--errlogfile", dest=u"errlogfile",
+					help=u"le fichier de log",metavar=u'<file>')
+
+	parser.add_option(u"-d", u"--dbglogfile", dest=u"dbglogfile",
+					help=u"le fichier de log des trace de debug",metavar=u'<file>')
+
+	parser.add_option(u"-n", u"--infologfile", dest=u"infologfile",
+					help=u"le fichier de log des trace de debug",metavar=u'<file>')
+
+	parser.add_option(u"-v", "--version", dest=u"version",  action=u"store_true",default=False,
+					help=u"affiche la version du programme de biblog")
+
+	parser.add_option(u"-c", u"--msgcfgfile", dest=u"msgcfgfile",
+					help=u"le fichier de conf des message",metavar=u'<file>')
+	
+	parser.add_option(u"-a", u"--proginfo", dest=u"proginfo",
+				help=u"liste des infos à substituer du prog(PID,threadName,line,...) : couple clef:valeurs séparés par ; exemple:PID:1246; cles="+unicode(ginfo.keys()), metavar="{list}")
+	
+	parser.add_option(u"-m", u"--msgid", dest=u"msgid",
+					help=u"le message à logger",metavar='<msgid>')
+
+	parser.add_option(u"-p", u"--msgparams", dest=u"msgparams",
+					help=u"les paramètres du message",metavar=u'<msgparams>')
+	
+	parser.add_option(u"-g", u"--logInConsole", dest=u"logInConsole",
+					help=u"logger dans la console (defaut = 1) 0 pour ne pas logger à l'écran",metavar=u'logInConsole=[0,1]')
+
+	parser.add_option(u"-l", u"--level", dest=u"level",
+					help=u"niveau de debug (DEBUG,ERROR,INFO) le niveau ERROR ne log que les erreurs, DEBUG log tout",metavar=u'level=[DEBUG,INFO,ERROR]')
+
+	parser.add_option(u"-b", "--maxBytes", dest=u"maxBytes",
+					help=u"taille maximale d'un fichier de log",metavar=u'<maxBytes>')
+
+	parser.add_option(u"-u", u"--backupCount", dest=u"backupCount",
+					help=u"nombre de fichier de rotation pour un fichier de log donnée",metavar=u'<backupCount>')
+
+	(options, args) = parser.parse_args()
+	CFG_LOG={}
+	"""	
+	"-singlefile":"log2/all-logs.log",
+	"multi-infofile":"log2/msglogs.log",
+	"multi-errfile":"log2/errorlogs.log",
+	"-multi-dbgfile":"log2/debugLogs.log",
+	"rotate-maxBytes":"5000",
+	"rotate-backupCount":3,
+	"logInConsole":1,
+	"level":"INFO"
+	"""
+
+	if options.version:
+		print(u"biblog version *** :"+_BIBLOG_VERSION_)
+		import socket
+		#import platform
+		hostname = socket.gethostname()
+		#print platform.uname()
+		cmd=u"iroger maj objet=refversobj,nmobjet=purgeman,nmhost="+hostname.lower()+u",novers="+_BIBLOG_VERSION_
+		print (u"\n###\ncalling cmd : ",cmd)
+		p = subprocess.Popen(cmd, 
+				stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True,cwd=os.getcwd())
+		while True:
+				line = p.stdout.readline()
+				if not line:
+					break
+				print (u"IROGER:"+unicode(line))
+		print (u"Version : "+unicode(_BIBLOG_VERSION_))
+		sys.exit( -1)
+		
+	if options.backupCount :
+		CFG_LOG[u'rotate-backupCount']=options.backupCount
+
+	if options.maxBytes :
+		CFG_LOG[u'rotate-maxBytes']=options.maxBytes
+
+	if options.errlogfile :
+		CFG_LOG[u'multi-errfile']=options.errlogfile
+	
+	if options.dbglogfile:
+		CFG_LOG[u'multi-dbgfile']=options.dbglogfile
+
+	if options.logInConsole:
+		CFG_LOG[u'logInConsole']=options.logInConsole
+
+	if options.level:
+		CFG_LOG[u'level']=options.level
+
+	if options.infologfile:
+		CFG_LOG[u'multi-infofile']=options.infologfile
+
+	if not options.msgcfgfile:
+		print (u"--msgcfgfile: specifier le fichier de conf des messages")
+		return
+	
+	if not options.proginfo:
+		print (u"--proginfo: specifier la liste des mots clefs à substituer (PID,threadName,line,...)")
+		return
+	
+	if not options.msgid:
+		print (u"--msgid: specifier l'id du message à logger")
+		return
+	
+	options.msgparams=options.msgparams.split(";")
+	#print "message a afficher ",options.msgid,options.msgparams
+	#parser.print_usage()
+	ginfo[u'funcName']="-"
+	for tup in options.proginfo.split(";"):
+		[k,v]= tup.split(":")
+		if k in ginfo:
+			if v:
+				ginfo[k]=v
+
+	msgconf = loadMsgConf(options.msgcfgfile)
+	testlogger = BibLogger(CFG_LOG,msgconf)
+	if options.msgid in msgconf :
+		testlogger.log(msgconf[options.msgid], params=options.msgparams)
+	else:
+		print (u"erreur",options.msgid, u" introuvable dans fichie de conf")
+
+if __name__ == u"__main__":
+	print (u"Python start...")
+	startCmd(sys.argv)

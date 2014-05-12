@@ -1,0 +1,7 @@
+#!/bin/bash
+
+python_path=$HOME/bin/python2.7
+script_path=$HOME/lib/webservice/server.py
+
+exec $python_path $script_path
+	

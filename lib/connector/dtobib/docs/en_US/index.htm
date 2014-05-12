@@ -1,0 +1,48 @@
+<html>
+
+<head>
+   <META HTTP-EQUIV="Content-Type" CONTENT="text/html; CHARSET=utf-8" />
+   
+    <link rel="stylesheet" type="text/css" href="local/Frameset.css">
+      
+    </link>
+
+  </head>
+
+<body nowrap>
+    <script language="JavaScript" src="local/script_index.js"></script>
+    
+    <div id="header">
+    	<a href="toc.htm" id="headerActive">Contents </a><span id="headerInActive">| <b>Index</b></span>
+	</div>       
+	
+	<div id="filterOption" onClick="ToggleFilterBox()" align="left">
+	</div>
+		
+    <div id="navigation">
+    	
+		<div id="filterBox">
+			
+			<FORM style="margin-top:2" onsubmit="Filter(); return false;">
+				 <div>Look For:</div>	  		
+				<INPUT NAME="searchText" id="searchText" TYPE="TEXT"  SIZE="28"/>
+
+				<div>Options:</div>
+				<select size="1" id="searchOptions" name="searchOptions" >
+				<option value="0" selected="yes">Contains</option>
+				<option value="1">Starts With</option>
+				</select>
+				<INPUT NAME="searchButton" id="searchButton" TYPE="Submit"  value="Filter"/>
+				
+		  	</FORM>
+	  	</div>
+	</div>
+
+<div id="Filter" class="FilterLabel"><b>Filter </b></div>
+<div id="ContainsError" class="FilterLabel">A 'Contains' search must be at least 3 characters.</div>
+<div id="NoFilterResult" class="FilterLabel">(None)</div>
+
+
+<div id="searchResult"></div>
+
+<div id="content"></div></body></html>

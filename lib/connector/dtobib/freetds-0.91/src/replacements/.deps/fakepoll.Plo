@@ -1,0 +1,3 @@
+fakepoll.lo fakepoll.o: fakepoll.c ../../include/config.h
+
+../../include/config.h:

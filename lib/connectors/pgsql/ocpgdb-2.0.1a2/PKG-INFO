@@ -1,0 +1,12 @@
+Metadata-Version: 1.0
+Name: ocpgdb
+Version: 2.0.1a2
+Summary: A simple and safe PostgreSQL DB-API 2 adapter
+Home-page: http://code.google.com/p/ocpgdb/
+Author: Andrew McNamara
+Author-email: andrewm@object-craft.com.au
+License: BSD
+Download-URL: http://code.google.com/p/ocpgdb/downloads/list
+Description: A simple and safe PostgreSQL DB-API 2 adapter
+Platform: Python 2.3 and later
+Platform: PostgreSQL 8.0 and later
