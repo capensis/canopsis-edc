@@ -75,10 +75,10 @@ coding_re = re.compile("coding[:=]\s*([-\w_.]+)")
 
 class EncodingMessage(SimpleDialog):
     "Inform user that an encoding declaration is needed."
-    def __init__(self, master, enc):
+    def __init__(self, main, enc):
         self.should_edit = False
 
-        self.root = top = Toplevel(master)
+        self.root = top = Toplevel(main)
         top.bind("<Return>", self.return_event)
         top.bind("<Escape>", self.do_ok)
         top.protocol("WM_DELETE_WINDOW", self.wm_delete_window)
@@ -111,7 +111,7 @@ class EncodingMessage(SimpleDialog):
                     command=self.do_edit)
         b2.pack(side=LEFT, fill=BOTH, expand=1)
 
-        self._set_transient(master)
+        self._set_transient(main)
 
     def do_ok(self):
         self.done(0)
@@ -252,7 +252,7 @@ class IOBinding:
             chars = f.read()
             f.close()
         except IOError, msg:
-            tkMessageBox.showerror("I/O Error", str(msg), master=self.text)
+            tkMessageBox.showerror("I/O Error", str(msg), main=self.text)
             return False
 
         chars = self.decode(chars)
@@ -299,7 +299,7 @@ class IOBinding:
                 title="Error loading the file",
                 message="The encoding '%s' is not known to this Python "\
                 "installation. The file may not display correctly" % name,
-                master = self.text)
+                main = self.text)
             enc = None
         if enc:
             try:
@@ -329,7 +329,7 @@ class IOBinding:
                   title="Save On Close",
                   message=message,
                   default=tkMessageBox.YES,
-                  master=self.text)
+                  main=self.text)
         if confirm:
             reply = "yes"
             self.save(None)
@@ -390,7 +390,7 @@ class IOBinding:
             return True
         except IOError, msg:
             tkMessageBox.showerror("I/O Error", str(msg),
-                                   master=self.text)
+                                   main=self.text)
             return False
 
     def encode(self, chars):
@@ -420,7 +420,7 @@ class IOBinding:
             tkMessageBox.showerror(
                 "I/O Error",
                 "%s. Saving as UTF-8" % failed,
-                master = self.text)
+                main = self.text)
         # If there was a UTF-8 signature, use that. This should not fail
         if self.fileencoding == BOM_UTF8 or failed:
             return BOM_UTF8 + chars.encode("utf-8")
@@ -433,7 +433,7 @@ class IOBinding:
                     "I/O Error",
                     "Cannot save this as '%s' anymore. Saving as UTF-8" \
                     % self.fileencoding,
-                    master = self.text)
+                    main = self.text)
                 return BOM_UTF8 + chars.encode("utf-8")
         # Nothing was declared, and we had not determined an encoding
         # on loading. Recommend an encoding line.
@@ -477,7 +477,7 @@ class IOBinding:
                   title="Print",
                   message="Print to Default Printer",
                   default=tkMessageBox.OK,
-                  master=self.text)
+                  main=self.text)
         if not confirm:
             self.text.focus_set()
             return "break"
@@ -514,10 +514,10 @@ class IOBinding:
                          status + output
             if output:
                 output = "Printing command: %s\n" % repr(command) + output
-                tkMessageBox.showerror("Print status", output, master=self.text)
+                tkMessageBox.showerror("Print status", output, main=self.text)
         else:  #no printing for this platform
             message = "Printing is not enabled for this platform: %s" % platform
-            tkMessageBox.showinfo("Print status", message, master=self.text)
+            tkMessageBox.showinfo("Print status", message, main=self.text)
         if tempfilename:
             os.unlink(tempfilename)
         return "break"
@@ -534,7 +534,7 @@ class IOBinding:
     def askopenfile(self):
         dir, base = self.defaultfilename("open")
         if not self.opendialog:
-            self.opendialog = tkFileDialog.Open(master=self.text,
+            self.opendialog = tkFileDialog.Open(main=self.text,
                                                 filetypes=self.filetypes)
         filename = self.opendialog.show(initialdir=dir, initialfile=base)
         if isinstance(filename, unicode):
@@ -556,7 +556,7 @@ class IOBinding:
     def asksavefile(self):
         dir, base = self.defaultfilename("save")
         if not self.savedialog:
-            self.savedialog = tkFileDialog.SaveAs(master=self.text,
+            self.savedialog = tkFileDialog.SaveAs(main=self.text,
                                                   filetypes=self.filetypes)
         filename = self.savedialog.show(initialdir=dir, initialfile=base)
         if isinstance(filename, unicode):
